@@ -1,0 +1,144 @@
+plugins {
+    id 'fabric-loom' version '0.12-SNAPSHOT'
+    id 'idea'
+}
+
+apply from: '../gradle/property_helper.gradle'
+apply from: '../gradle/patreon.gradle'
+
+archivesBaseName = "${mod_name}-Fabric-${minecraft_version}"
+
+// Enable Mixins
+project.ext.mixin_enabled = project.file("src/main/resources/${mod_id}.fabric.mixins.json").exists()
+project.ext.mixin_refmap = "${archivesBaseName}-refmap.json"
+project.logger.lifecycle("Mixin ${project.ext.mixin_enabled ? 'enabled' : 'disabled'} for project ${project.name}.")
+
+dependencies {
+    minecraft "com.mojang:minecraft:${minecraft_version}"
+    mappings loom.officialMojangMappings()
+    modImplementation "net.fabricmc:fabric-loader:${fabric_loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_version}"
+    implementation group: 'com.google.code.findbugs', name: 'jsr305', version: '3.0.1'
+    implementation project(":Common")
+}
+
+sourceSets {
+    gametest {
+        compileClasspath += main.compileClasspath
+        runtimeClasspath += main.runtimeClasspath
+        compileClasspath += main.output
+        runtimeClasspath += main.output
+
+        compileClasspath += project(":Common").sourceSets.main.compileClasspath
+        runtimeClasspath += project(":Common").sourceSets.main.runtimeClasspath
+        compileClasspath += project(":Common").sourceSets.main.output
+        runtimeClasspath += project(":Common").sourceSets.main.output
+    }
+}
+
+loom {
+    runs {
+        client {
+            client()
+            setConfigName("Fabric Client")
+            ideConfigGenerated(true)
+            runDir("run")
+        }
+        server {
+            server()
+            setConfigName("Fabric Server")
+            ideConfigGenerated(true)
+            runDir("run")
+        }
+        gametestServer {
+            server()
+            source(project.sourceSets.gametest)
+            vmArg("-Dfabric-api.gametest")
+            vmArg("-Dfabric-api.gametest.report-file=${project.buildDir}/junit.xml")
+            setConfigName("Fabric Game Test (Server)")
+            runDir("build/gametest")
+        }
+        // Use to debug tests
+        gametestClient {
+            client()
+            source(project.sourceSets.gametest)
+            setConfigName("Fabric Game Test (Client)")
+            ideConfigGenerated(true)
+            runDir("run")
+        }
+    }
+}
+
+processResources {
+
+    from project(":Common").sourceSets.main.resources
+
+    def buildProps = project.properties.clone()
+
+    if (project.hasProperty('patreon')) {
+
+        def supporters = new ArrayList<String>()
+
+        for (entry in project.ext.patreon.pledges) {
+
+            def pledge = entry.value;
+
+            if (pledge.isValid()) {
+
+                supporters.add(pledge.getDisplayName())
+            }
+        }
+
+        buildProps.put('mod_supporters', supporters.join(/","/))
+    }
+
+    filesMatching(['fabric.mod.json', 'pack.mcmeta']) {
+
+        expand buildProps
+    }
+
+    if (project.ext.mixin_enabled) {
+
+        filesMatching('*.mixins.json') {
+
+            expand buildProps
+        }
+    }
+}
+
+tasks.withType(JavaCompile) {
+    source(project(":Common").sourceSets.main.allSource)
+}
+
+// -- MAVEN PUBLISHING --
+project.publishing {
+
+    publications {
+
+        mavenJava(MavenPublication) {
+
+            artifactId project.archivesBaseName
+
+            from(components["java"])
+        }
+    }
+
+    repositories {
+
+        maven {
+
+            // Sets maven credentials if they are provided. This is generally
+            // only used for external/remote uploads.
+            if (project.hasProperty('mavenUsername') && project.hasProperty('mavenPassword')) {
+
+                credentials {
+
+                    username findProperty('mavenUsername')
+                    password findProperty('mavenPassword')
+                }
+            }
+
+            url getDefaultString('mavenURL', 'undefined', true)
+        }
+    }
+}
